@@ -34,7 +34,7 @@ public class TrafficApp {
     private static final String FAKE_BROWSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36";
 
     public static void main(String[] args) {
-        JFrame frame = new JFrame("Expert Traffic System - Smart Routing Engine");
+        JFrame frame = new JFrame("Expert Traffic System - Global Routing");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
@@ -112,25 +112,24 @@ public class TrafficApp {
                 // Step A: Fetch Main Route
                 List<GeoPosition> roadTrack = getRoadPath(startPos, endPos);
 
-                // --- OCEAN CROSSING / IMPOSSIBLE ROUTE CHECK ---
+                // --- OSRM NATIVE OCEAN/IMPOSSIBLE ROUTE CHECK ---
                 if (roadTrack.isEmpty()) {
                     SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("Status: Route Impossible (Ocean Crossing)");
+                        statusLabel.setText("Status: Route Impossible (No Roads)");
                         statusLabel.setForeground(new Color(220, 53, 69)); // Red
                         JOptionPane.showMessageDialog(frame, 
                             "No driving route exists between these locations.\nThey may be separated by an ocean or lack connecting roads.", 
-                            "Routing Failed", 
+                            "Routing Blocked", 
                             JOptionPane.WARNING_MESSAGE);
                         
-                        // Just draw the pins so the user sees where they searched, but no lines.
                         WaypointPainter<DefaultWaypoint> wpPainter = new WaypointPainter<>();
                         wpPainter.setWaypoints(new HashSet<>(Arrays.asList(new DefaultWaypoint(startPos), new DefaultWaypoint(endPos))));
                         mapViewer.setOverlayPainter(wpPainter);
                         mapViewer.setAddressLocation(startPos);
-                        mapViewer.setZoom(14); // Zoom out to see the gap
+                        mapViewer.setZoom(12);
                         mapViewer.repaint();
                     });
-                    return; // Abort the rest of the traffic analysis!
+                    return; // Abort analysis!
                 }
 
                 // Step B: EXPERT SYSTEM - DETECT TRAFFIC BOTTLENECK
@@ -143,6 +142,7 @@ public class TrafficApp {
 
                 if (roadTrack.size() > 20) {
                     Random rand = new Random();
+                    // Simulate a traffic jam roughly in the middle of the route
                     int jamStart = rand.nextInt(roadTrack.size() / 2) + (roadTrack.size() / 5);
                     int jamLength = Math.min(80, roadTrack.size() / 3); 
                     
@@ -151,6 +151,7 @@ public class TrafficApp {
                         trafficNodeCount++;
                     }
                     
+                    // LOOK-BACK LOGIC
                     if (jamStart > 0 && jamStart + jamLength < roadTrack.size()) {
                         int stepBackIndex = Math.max(0, jamStart - 25);
                         int stepForwardIndex = Math.min(roadTrack.size() - 1, jamStart + jamLength + 25);
@@ -162,11 +163,13 @@ public class TrafficApp {
                 }
 
                 // Step C: EXPERT SYSTEM - 3-TIER CASCADE DETOUR
+                // ✅ FIXED LAMBDA SCOPE ERROR: Declared 'final' and only populated using '.addAll()'
                 final List<GeoPosition> detourTrack = new ArrayList<>();
                 String tempStatus;
                 Color tempColor;
                 
                 if (bottleneckFound && trafficNodeCount > 10) {
+                    // TIER 1: Try Local Bypass
                     List<GeoPosition> localDetour = getAlgorithmicDetourPath(divergePoint, rejoinPoint);
                     
                     if (!localDetour.isEmpty()) {
@@ -174,6 +177,7 @@ public class TrafficApp {
                         tempStatus = "EXPERT: Local bypass route activated (Green)";
                         tempColor = new Color(0, 150, 0); 
                     } else {
+                        // TIER 2: Try Global 2nd Route (Start to End)
                         List<GeoPosition> fullAlternative = getAlgorithmicDetourPath(startPos, endPos);
                         
                         if (!fullAlternative.isEmpty()) {
@@ -181,7 +185,7 @@ public class TrafficApp {
                             tempStatus = "EXPERT: Local bypass failed. Showing full 2nd Route.";
                             tempColor = new Color(0, 150, 0); 
                         } else {
-                            // Geometric Offset Fallback
+                            // TIER 3: Geometric Offline Fallback (Guarantees a green line for demo)
                             double offset = 0.025; 
                             GeoPosition via = new GeoPosition(divergePoint.getLatitude() + offset, divergePoint.getLongitude() - offset);
                             detourTrack.addAll(getGeometricFallback(divergePoint, via, rejoinPoint));
@@ -205,7 +209,7 @@ public class TrafficApp {
                     g.translate(-rect.x, -rect.y);
                     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     
-                    g.setColor(new Color(0, 200, 0, 200)); 
+                    g.setColor(new Color(0, 200, 0, 200)); // Thick Green
                     g.setStroke(new BasicStroke(12, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)); 
 
                     Point2D last = null;
@@ -243,9 +247,12 @@ public class TrafficApp {
                     WaypointPainter<DefaultWaypoint> wpPainter = new WaypointPainter<>();
                     wpPainter.setWaypoints(new HashSet<>(Arrays.asList(new DefaultWaypoint(startPos), new DefaultWaypoint(endPos))));
                     
+                    // Layering Z-Index: Map -> Detour (Thick Green) -> Primary (Thin Blue/Red) -> Waypoints (Highest)
                     mapViewer.setOverlayPainter(new CompoundPainter<>(Arrays.asList(detourPainter, primaryRoutePainter, wpPainter)));
+                    
                     statusLabel.setText(finalStatus);
                     statusLabel.setForeground(finalStatusColor);
+                    
                     mapViewer.setAddressLocation(startPos);
                     mapViewer.repaint();
                 });
@@ -359,7 +366,7 @@ public class TrafficApp {
         return null;
     }
 
-    // --- API: OSRM STANDARD ROAD ROUTING (OCEAN CHECK ADDED) ---
+    // --- API: OSRM STANDARD ROAD ROUTING (OCEAN CHECK) ---
     private static List<GeoPosition> getRoadPath(GeoPosition start, GeoPosition end) {
         List<GeoPosition> path = new ArrayList<>();
         try {
@@ -383,7 +390,6 @@ public class TrafficApp {
                 path.add(new GeoPosition(Double.parseDouble(lonLat[1]), Double.parseDouble(lonLat[0])));
             }
         } catch (Exception e) { 
-            // Removed the straight line failsafe to stop drawing over oceans on error.
             System.err.println("Main route API error: " + e.getMessage());
         }
         return path;
