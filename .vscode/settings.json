@@ -1,0 +1,25 @@
+{
+    "java.configuration.updateBuildConfiguration": "automatic",
+    "java.import.maven.enabled": true,
+    "java.autobuild.enabled": true,
+    "java.project.sourcePaths": ["src/main/java"],
+    "java.project.outputPath": "target/classes",
+    "java.errors.incompleteClasspath.severity": "warning",
+    "java.configuration.runtimes": [
+        {
+            "name": "JavaSE-21",
+            "path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.10.7-hotspot",
+            "default": true
+        }
+    ],
+    "java.debug.settings.console": "internalConsole",
+    "files.exclude": {
+        "**/.git": true,
+        "**/.DS_Store": true,
+        "**/target": false,
+        "**/.classpath": true,
+        "**/.project": true,
+        "**/.settings": true,
+        "**/*.class": true
+    }
+}
