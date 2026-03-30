@@ -1,0 +1,56 @@
+# ==========================================
+# Java / Maven Project .gitignore
+# ==========================================
+
+# 1. Compiled Class Files
+*.class
+
+# 2. Maven Build Directory (Crucial!)
+# This ignores the massive folder where Maven dumps compiled code and dependencies
+target/
+dependency-reduced-pom.xml
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+
+# 3. Packages and Archives
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar
+
+# 4. Logs and Databases
+*.log
+*.sqlite
+*.db
+
+# 5. IDE Specific Folders (Prevents overwriting teammates' settings)
+# VS Code
+.vscode/
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+# Eclipse
+.project
+.classpath
+.settings/
+.metadata/
+
+# 6. Operating System Generated Files
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# 7. Java Crash Reports
+hs_err_pid*
+replay_pid*
