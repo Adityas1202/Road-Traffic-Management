@@ -34,7 +34,7 @@ public class TrafficApp {
     private static final String FAKE_BROWSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36";
 
     public static void main(String[] args) {
-        JFrame frame = new JFrame("Expert Traffic System - Global Routing");
+        JFrame frame = new JFrame("Expert Traffic System - Pure Dijkstra Routing");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
@@ -47,12 +47,12 @@ public class TrafficApp {
         mapViewer.addMouseMotionListener(mia);
         mapViewer.addMouseWheelListener(new ZoomMouseWheelListenerCursor(mapViewer));
         
-        mapViewer.setAddressLocation(new GeoPosition(22.9868, 88.4897)); // IIIT Kalyani Focus
+        mapViewer.setAddressLocation(new GeoPosition(22.9868, 88.4897)); 
         mapViewer.setZoom(5);
 
         // 2. Sidebar UI
         JPanel sidebar = new JPanel(new GridBagLayout());
-        sidebar.setPreferredSize(new Dimension(320, 800));
+        sidebar.setPreferredSize(new Dimension(340, 800)); 
         sidebar.setBorder(BorderFactory.createEmptyBorder(20, 15, 20, 15));
         
         GridBagConstraints gbc = new GridBagConstraints();
@@ -63,7 +63,7 @@ public class TrafficApp {
         gbc.gridy = 0; sidebar.add(new JLabel("Start Location:"), gbc);
         gbc.gridy = 1; 
         JTextField startField = new JTextField();
-        startField.setPreferredSize(new Dimension(250, 35));
+        startField.setPreferredSize(new Dimension(280, 35));
         setupAutocomplete(startField); 
         sidebar.add(startField, gbc);
 
@@ -72,7 +72,7 @@ public class TrafficApp {
         gbc.gridy = 3; sidebar.add(new JLabel("End Location:"), gbc);
         gbc.gridy = 4; 
         JTextField endField = new JTextField();
-        endField.setPreferredSize(new Dimension(250, 35));
+        endField.setPreferredSize(new Dimension(280, 35));
         setupAutocomplete(endField); 
         sidebar.add(endField, gbc);
 
@@ -82,7 +82,7 @@ public class TrafficApp {
         analyzeBtn.setCursor(new Cursor(Cursor.HAND_CURSOR));
         gbc.gridy = 6; sidebar.add(analyzeBtn, gbc);
 
-        statusLabel = new JLabel("Status: Awaiting Input");
+        statusLabel = new JLabel("<html>Status: Awaiting Input</html>");
         statusLabel.setFont(new Font("SansSerif", Font.BOLD, 12));
         gbc.gridy = 7; sidebar.add(statusLabel, gbc);
 
@@ -94,7 +94,7 @@ public class TrafficApp {
             String endText = endField.getText().trim();
             
             if (startText.isEmpty() || endText.isEmpty()) return;
-            statusLabel.setText("Status: Analyzing Map Data...");
+            statusLabel.setText("<html>Status: Analyzing Map Data...</html>");
             statusLabel.setForeground(Color.BLACK);
 
             new Thread(() -> {
@@ -103,20 +103,19 @@ public class TrafficApp {
 
                 if (startPos == null || endPos == null) {
                     SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("Status: Location Error");
+                        statusLabel.setText("<html>Status: Location Error</html>");
                         JOptionPane.showMessageDialog(frame, "Could not find one or both locations.", "Error", JOptionPane.ERROR_MESSAGE);
                     });
                     return;
                 }
 
-                // Step A: Fetch Main Route
+                // Step A: Fetch Main Route (Shortest Path via Dijkstra)
                 List<GeoPosition> roadTrack = getRoadPath(startPos, endPos);
 
-                // --- OSRM NATIVE OCEAN/IMPOSSIBLE ROUTE CHECK ---
                 if (roadTrack.isEmpty()) {
                     SwingUtilities.invokeLater(() -> {
-                        statusLabel.setText("Status: Route Impossible (No Roads)");
-                        statusLabel.setForeground(new Color(220, 53, 69)); // Red
+                        statusLabel.setText("<html>Status: Route Impossible (No Roads)</html>");
+                        statusLabel.setForeground(new Color(220, 53, 69)); 
                         JOptionPane.showMessageDialog(frame, 
                             "No driving route exists between these locations.\nThey may be separated by an ocean or lack connecting roads.", 
                             "Routing Blocked", 
@@ -129,70 +128,103 @@ public class TrafficApp {
                         mapViewer.setZoom(12);
                         mapViewer.repaint();
                     });
-                    return; // Abort analysis!
+                    return; 
+                }
+
+                // --- OCEAN GAP CHECK ---
+                GeoPosition routeEnd = roadTrack.get(roadTrack.size() - 1);
+                double latDiffEnd = endPos.getLatitude() - routeEnd.getLatitude();
+                double lonDiffEnd = endPos.getLongitude() - routeEnd.getLongitude();
+                double snapDistance = Math.sqrt((latDiffEnd * latDiffEnd) + (lonDiffEnd * lonDiffEnd));
+
+                if (snapDistance > 1.5) { 
+                    SwingUtilities.invokeLater(() -> {
+                        statusLabel.setText("<html>Status: Route Incomplete<br>(Ocean Gap Detected)</html>");
+                        statusLabel.setForeground(new Color(220, 53, 69)); 
+                        JOptionPane.showMessageDialog(frame, 
+                            "The routing engine reached the edge of the connected road network and cannot reach the final destination.", 
+                            "Ocean Crossing Blocked", 
+                            JOptionPane.WARNING_MESSAGE);
+                        
+                        WaypointPainter<DefaultWaypoint> wpPainter = new WaypointPainter<>();
+                        wpPainter.setWaypoints(new HashSet<>(Arrays.asList(new DefaultWaypoint(startPos), new DefaultWaypoint(endPos))));
+                        mapViewer.setOverlayPainter(wpPainter);
+                        mapViewer.setAddressLocation(startPos);
+                        mapViewer.setZoom(12);
+                        mapViewer.repaint();
+                    });
+                    return; 
                 }
 
                 // Step B: EXPERT SYSTEM - DETECT TRAFFIC BOTTLENECK
                 boolean[] isTraffic = new boolean[roadTrack.size()];
                 int trafficNodeCount = 0;
                 
-                GeoPosition divergePoint = null;
-                GeoPosition rejoinPoint = null;
+                int jamLength = 0;
+                int jamStart = 0;
                 boolean bottleneckFound = false;
 
                 if (roadTrack.size() > 20) {
                     Random rand = new Random();
-                    // Simulate a traffic jam roughly in the middle of the route
-                    int jamStart = rand.nextInt(roadTrack.size() / 2) + (roadTrack.size() / 5);
-                    int jamLength = Math.min(80, roadTrack.size() / 3); 
+                    jamLength = Math.max(10, roadTrack.size() / 4);
+                    jamStart = rand.nextInt(Math.max(1, roadTrack.size() - jamLength - 10)) + 5; 
                     
                     for (int i = jamStart; i < jamStart + jamLength && i < roadTrack.size(); i++) {
                         isTraffic[i] = true;
                         trafficNodeCount++;
                     }
                     
-                    // LOOK-BACK LOGIC
                     if (jamStart > 0 && jamStart + jamLength < roadTrack.size()) {
-                        int stepBackIndex = Math.max(0, jamStart - 25);
-                        int stepForwardIndex = Math.min(roadTrack.size() - 1, jamStart + jamLength + 25);
-                        
-                        divergePoint = roadTrack.get(stepBackIndex); 
-                        rejoinPoint = roadTrack.get(stepForwardIndex); 
                         bottleneckFound = true;
                     }
                 }
 
-                // Step C: EXPERT SYSTEM - 3-TIER CASCADE DETOUR
-                // ✅ FIXED LAMBDA SCOPE ERROR: Declared 'final' and only populated using '.addAll()'
-                final List<GeoPosition> detourTrack = new ArrayList<>();
+                // Step C: EXPERT SYSTEM - PURE DIJKSTRA ALTERNATIVES
+                final List<GeoPosition> globalAlternativeTrack = new ArrayList<>();
+                final List<GeoPosition> localBypassTrack = new ArrayList<>();
+                
                 String tempStatus;
                 Color tempColor;
                 
                 if (bottleneckFound && trafficNodeCount > 10) {
-                    // TIER 1: Try Local Bypass
-                    List<GeoPosition> localDetour = getAlgorithmicDetourPath(divergePoint, rejoinPoint);
                     
-                    if (!localDetour.isEmpty()) {
-                        detourTrack.addAll(localDetour);
-                        tempStatus = "EXPERT: Local bypass route activated (Green)";
-                        tempColor = new Color(0, 150, 0); 
-                    } else {
-                        // TIER 2: Try Global 2nd Route (Start to End)
-                        List<GeoPosition> fullAlternative = getAlgorithmicDetourPath(startPos, endPos);
+                    // 1. GLOBAL GREEN ROUTE (2nd fastest for the whole trip)
+                    globalAlternativeTrack.addAll(getAlgorithmicDetourPath(startPos, endPos));
+
+                    // 2. LOCAL YELLOW BYPASS (Dynamic Dijkstra Expansion)
+                    int window = 0; // Start exactly at the bounds of the red line
+                    int maxRetries = 10; // Try expanding the search up to 10 times to find a legal road exit
+                    
+                    GeoPosition divergePoint = null;
+                    GeoPosition rejoinPoint = null;
+
+                    for (int attempt = 0; attempt < maxRetries; attempt++) {
+                        int stepBackIndex = Math.max(0, jamStart - window);
+                        int stepForwardIndex = Math.min(roadTrack.size() - 1, jamStart + jamLength + window);
                         
-                        if (!fullAlternative.isEmpty()) {
-                            detourTrack.addAll(fullAlternative);
-                            tempStatus = "EXPERT: Local bypass failed. Showing full 2nd Route.";
-                            tempColor = new Color(0, 150, 0); 
+                        divergePoint = roadTrack.get(stepBackIndex); 
+                        rejoinPoint = roadTrack.get(stepForwardIndex); 
+
+                        // Ask the API for a pure Dijkstra 2nd fastest route between these two points
+                        List<GeoPosition> attemptDetour = getAlgorithmicDetourPath(divergePoint, rejoinPoint);
+                        
+                        if (!attemptDetour.isEmpty()) {
+                            localBypassTrack.addAll(attemptDetour);
+                            break; // Success! OSRM found a real road alternative.
                         } else {
-                            // TIER 3: Geometric Offline Fallback (Guarantees a green line for demo)
-                            double offset = 0.025; 
-                            GeoPosition via = new GeoPosition(divergePoint.getLatitude() + offset, divergePoint.getLongitude() - offset);
-                            detourTrack.addAll(getGeometricFallback(divergePoint, via, rejoinPoint));
-                            tempStatus = "EXPERT: Geometric safety bypass activated.";
-                            tempColor = new Color(0, 150, 0);
+                            // OSRM failed to find an alternative road. 
+                            // Expand the search window outward by 15 coordinate points to find an earlier exit ramp.
+                            window += 15; 
                         }
                     }
+
+                    if (!localBypassTrack.isEmpty()) {
+                        tempStatus = "EXPERT: Local Bypass (Yellow)<br>& Global Alt (Green) Active";
+                    } else {
+                        tempStatus = "EXPERT: No parallel roads available.<br>Global Alt (Green) Active";
+                    }
+                    tempColor = new Color(0, 120, 0);
+                    
                 } else {
                     tempStatus = "EXPERT: Route Clear, Standard Path Optimal";
                     tempColor = new Color(0, 150, 0);
@@ -201,19 +233,19 @@ public class TrafficApp {
                 final String finalStatus = tempStatus;
                 final Color finalStatusColor = tempColor;
 
-                // --- PAINTER 1: DETOUR ROUTE (Drawn First, THICK Green) ---
-                Painter<JXMapViewer> detourPainter = (g, map, w, h) -> {
-                    if (detourTrack.isEmpty()) return;
+                // --- PAINTER 1: GLOBAL ALTERNATIVE (Drawn First, THICK Green) ---
+                Painter<JXMapViewer> globalPainter = (g, map, w, h) -> {
+                    if (globalAlternativeTrack.isEmpty()) return;
                     g = (Graphics2D) g.create();
                     Rectangle rect = map.getViewportBounds();
                     g.translate(-rect.x, -rect.y);
                     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                     
-                    g.setColor(new Color(0, 200, 0, 200)); // Thick Green
+                    g.setColor(new Color(0, 200, 0, 180)); 
                     g.setStroke(new BasicStroke(12, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)); 
 
                     Point2D last = null;
-                    for (GeoPosition gp : detourTrack) {
+                    for (GeoPosition gp : globalAlternativeTrack) {
                         Point2D current = map.getTileFactory().geoToPixel(gp, map.getZoom());
                         if (last != null) g.drawLine((int)last.getX(), (int)last.getY(), (int)current.getX(), (int)current.getY());
                         last = current;
@@ -221,7 +253,27 @@ public class TrafficApp {
                     g.dispose();
                 };
 
-                // --- PAINTER 2: PRIMARY ROUTE (Drawn Second, THIN Blue/Red) ---
+                // --- PAINTER 2: LOCAL BYPASS (Drawn Second, THICK Yellow) ---
+                Painter<JXMapViewer> localPainter = (g, map, w, h) -> {
+                    if (localBypassTrack.isEmpty()) return;
+                    g = (Graphics2D) g.create();
+                    Rectangle rect = map.getViewportBounds();
+                    g.translate(-rect.x, -rect.y);
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    
+                    g.setColor(new Color(255, 204, 0, 210)); 
+                    g.setStroke(new BasicStroke(12, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND)); 
+
+                    Point2D last = null;
+                    for (GeoPosition gp : localBypassTrack) {
+                        Point2D current = map.getTileFactory().geoToPixel(gp, map.getZoom());
+                        if (last != null) g.drawLine((int)last.getX(), (int)last.getY(), (int)current.getX(), (int)current.getY());
+                        last = current;
+                    }
+                    g.dispose();
+                };
+
+                // --- PAINTER 3: PRIMARY ROUTE (Drawn Last, THIN Blue/Red) ---
                 Painter<JXMapViewer> primaryRoutePainter = (g, map, w, h) -> {
                     g = (Graphics2D) g.create();
                     Rectangle rect = map.getViewportBounds();
@@ -233,8 +285,8 @@ public class TrafficApp {
                     for (int i = 0; i < roadTrack.size(); i++) {
                         Point2D current = map.getTileFactory().geoToPixel(roadTrack.get(i), map.getZoom());
                         if (last != null) {
-                            if (isTraffic[i]) g.setColor(new Color(220, 53, 69, 255)); 
-                            else g.setColor(new Color(30, 144, 255, 255)); 
+                            if (isTraffic[i]) g.setColor(new Color(220, 53, 69, 255)); // Red
+                            else g.setColor(new Color(30, 144, 255, 255)); // Blue
                             g.drawLine((int)last.getX(), (int)last.getY(), (int)current.getX(), (int)current.getY());
                         }
                         last = current;
@@ -247,10 +299,11 @@ public class TrafficApp {
                     WaypointPainter<DefaultWaypoint> wpPainter = new WaypointPainter<>();
                     wpPainter.setWaypoints(new HashSet<>(Arrays.asList(new DefaultWaypoint(startPos), new DefaultWaypoint(endPos))));
                     
-                    // Layering Z-Index: Map -> Detour (Thick Green) -> Primary (Thin Blue/Red) -> Waypoints (Highest)
-                    mapViewer.setOverlayPainter(new CompoundPainter<>(Arrays.asList(detourPainter, primaryRoutePainter, wpPainter)));
+                    mapViewer.setOverlayPainter(new CompoundPainter<>(Arrays.asList(
+                        globalPainter, localPainter, primaryRoutePainter, wpPainter
+                    )));
                     
-                    statusLabel.setText(finalStatus);
+                    statusLabel.setText("<html><div style='width: 280px; text-align: left;'>" + finalStatus + "</div></html>");
                     statusLabel.setForeground(finalStatusColor);
                     
                     mapViewer.setAddressLocation(startPos);
@@ -266,7 +319,6 @@ public class TrafficApp {
         frame.setVisible(true);
     }
 
-    // --- UI: FLOATING AUTOCOMPLETE SEARCH ---
     private static void setupAutocomplete(JTextField textField) {
         JPopupMenu suggestionPopup = new JPopupMenu();
         suggestionPopup.setFocusable(false);
@@ -300,18 +352,14 @@ public class TrafficApp {
                 timer = new Timer();
                 timer.schedule(new TimerTask() {
                     @Override public void run() { 
-                        if (textField.getText().length() > 2) {
-                            fetchSuggestions(textField.getText(), suggestionPopup, listModel, textField); 
-                        } else {
-                            SwingUtilities.invokeLater(() -> suggestionPopup.setVisible(false));
-                        }
+                        if (textField.getText().length() > 2) fetchSuggestions(textField.getText(), suggestionPopup, listModel, textField); 
+                        else SwingUtilities.invokeLater(() -> suggestionPopup.setVisible(false));
                     }
                 }, 600); 
             }
         });
     }
 
-    // --- API: NOMINATIM AUTOCOMPLETE SUGGESTIONS ---
     private static void fetchSuggestions(String query, JPopupMenu popup, DefaultListModel<String> listModel, JTextField textField) {
         try {
             String encodedQuery = URLEncoder.encode(query, StandardCharsets.UTF_8.toString());
@@ -334,83 +382,58 @@ public class TrafficApp {
                         else popup.pack();
                         textField.requestFocusInWindow(); 
                     }
-                } else {
-                    popup.setVisible(false);
-                }
+                } else popup.setVisible(false);
             });
         } catch (Exception ignored) {}
     }
 
-    // --- API: NOMINATIM GEOCODING ---
     private static GeoPosition getCoordinates(String address) {
-        String input = address.toLowerCase();
-        if (input.contains("iiit kalyani")) return new GeoPosition(22.9868, 88.4897);
-        if (input.contains("kharagpur")) return new GeoPosition(22.3149, 87.3105);
-        if (input.contains("kolkata")) return new GeoPosition(22.5726, 88.3639);
-        if (input.contains("delhi")) return new GeoPosition(28.6139, 77.2090);
-        
         try {
-            String encoded = URLEncoder.encode(address, StandardCharsets.UTF_8.toString());
-            String url = "https://nominatim.openstreetmap.org/search?q=" + encoded + "&format=json&limit=1";
+            String url = "https://nominatim.openstreetmap.org/search?q=" + URLEncoder.encode(address, StandardCharsets.UTF_8.toString()) + "&format=json&limit=1";
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build();
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).header("User-Agent", FAKE_BROWSER_AGENT).build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            
             if (response.body().contains("\"lat\":\"")) {
                 String body = response.body();
                 double lat = Double.parseDouble(body.split("\"lat\":\"")[1].split("\"")[0]);
                 double lon = Double.parseDouble(body.split("\"lon\":\"")[1].split("\"")[0]);
                 return new GeoPosition(lat, lon);
             }
-        } catch (Exception e) { e.printStackTrace(); }
+        } catch (Exception ignored) {}
         return null;
     }
 
-    // --- API: OSRM STANDARD ROAD ROUTING (OCEAN CHECK) ---
     private static List<GeoPosition> getRoadPath(GeoPosition start, GeoPosition end) {
         List<GeoPosition> path = new ArrayList<>();
         try {
-            String url = "https://router.project-osrm.org/route/v1/driving/" 
-                         + start.getLongitude() + "," + start.getLatitude() + ";" 
-                         + end.getLongitude() + "," + end.getLatitude() 
-                         + "?overview=full&geometries=geojson";
+            String url = "https://router.project-osrm.org/route/v1/driving/" + start.getLongitude() + "," + start.getLatitude() + ";" + end.getLongitude() + "," + end.getLatitude() + "?overview=full&geometries=geojson";
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(6)).build();
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).header("User-Agent", FAKE_BROWSER_AGENT).build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            
             String body = response.body();
-            // CHECK: If OSRM returns "NoRoute" (e.g., across an ocean), return empty list immediately!
-            if (body.contains("\"code\":\"NoRoute\"") || !body.contains("\"coordinates\":[")) {
-                return path; 
-            }
+            if (body.contains("\"code\":\"NoRoute\"") || !body.contains("\"coordinates\":[")) return path; 
             
             String coordsPart = body.split("\"coordinates\":\\[")[1].split("\\]\\]")[0];
             for (String pair : coordsPart.split("\\],\\[")) {
                 String[] lonLat = pair.replace("[", "").replace("]", "").split(",");
                 path.add(new GeoPosition(Double.parseDouble(lonLat[1]), Double.parseDouble(lonLat[0])));
             }
-        } catch (Exception e) { 
-            System.err.println("Main route API error: " + e.getMessage());
-        }
+        } catch (Exception ignored) {}
         return path;
     }
 
-    // --- API: OSRM ALGORITHMIC DETOUR ROUTING ---
-    private static List<GeoPosition> getAlgorithmicDetourPath(GeoPosition divergePoint, GeoPosition rejoinPoint) {
+    // API REQUEST 2: PURE DIJKSTRA ALTERNATIVE 
+    // Automatically grabs the 2nd fastest route directly from the routing engine.
+    private static List<GeoPosition> getAlgorithmicDetourPath(GeoPosition start, GeoPosition end) {
         List<GeoPosition> path = new ArrayList<>();
         try {
-            String url = "https://router.project-osrm.org/route/v1/driving/" 
-                         + divergePoint.getLongitude() + "," + divergePoint.getLatitude() + ";" 
-                         + rejoinPoint.getLongitude() + "," + rejoinPoint.getLatitude() 
-                         + "?overview=full&geometries=geojson&alternatives=true";
-                         
+            String url = "https://router.project-osrm.org/route/v1/driving/" + start.getLongitude() + "," + start.getLatitude() + ";" + end.getLongitude() + "," + end.getLatitude() + "?overview=full&geometries=geojson&alternatives=true";
             HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(6)).build();
             HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).header("User-Agent", FAKE_BROWSER_AGENT).build();
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            String[] routeChunks = response.body().split("\"coordinates\":\\[");
             
-            String body = response.body();
-            String[] routeChunks = body.split("\"coordinates\":\\[");
-            
+            // Chunk [2] contains the exact 2nd fastest route calculated by the engine
             if (routeChunks.length > 2) {
                 String coordsPart = routeChunks[2].split("\\]\\]")[0]; 
                 for (String pair : coordsPart.split("\\],\\[")) {
@@ -419,31 +442,6 @@ public class TrafficApp {
                 }
             } 
         } catch (Exception ignored) {}
-        return path;
-    }
-
-    // --- API: FAILSAFE ROUTING FOR GUARANTEED DEMO VISUALS ---
-    private static List<GeoPosition> getGeometricFallback(GeoPosition start, GeoPosition via, GeoPosition end) {
-        List<GeoPosition> path = new ArrayList<>();
-        try {
-            String url = "https://router.project-osrm.org/route/v1/driving/" 
-                         + start.getLongitude() + "," + start.getLatitude() + ";" 
-                         + via.getLongitude() + "," + via.getLatitude() + ";" 
-                         + end.getLongitude() + "," + end.getLatitude() 
-                         + "?overview=full&geometries=geojson";
-                         
-            HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(6)).build();
-            HttpRequest request = HttpRequest.newBuilder().uri(URI.create(url)).header("User-Agent", FAKE_BROWSER_AGENT).build();
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            
-            String coordsPart = response.body().split("\"coordinates\":\\[")[1].split("\\]\\]")[0];
-            for (String pair : coordsPart.split("\\],\\[")) {
-                String[] lonLat = pair.replace("[", "").replace("]", "").split(",");
-                path.add(new GeoPosition(Double.parseDouble(lonLat[1]), Double.parseDouble(lonLat[0])));
-            }
-        } catch (Exception e) { 
-            path.addAll(Arrays.asList(start, via, end)); 
-        }
         return path;
     }
 }
