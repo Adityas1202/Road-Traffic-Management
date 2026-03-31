@@ -34,7 +34,7 @@ public class TrafficApp {
     private static final String FAKE_BROWSER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/122.0.0.0 Safari/537.36";
 
     public static void main(String[] args) {
-        JFrame frame = new JFrame("Expert Traffic System - Pure Dijkstra Routing");
+        JFrame frame = new JFrame("Expert Traffic System");
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setLayout(new BorderLayout());
 
